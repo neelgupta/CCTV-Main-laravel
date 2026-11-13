@@ -1,0 +1,48 @@
+<IfModule mod_authz_core.c>
+    <FilesMatch "^\.">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^\.">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Forbid direct requests to any hidden path like /.env or /.git.
+    RewriteRule (^|/)\. - [F,L]
+
+    # Serve public assets directly from the public directory.
+    RewriteRule ^manifest\.json$ public/manifest.json [L]
+    RewriteRule ^build/(.*)$ public/build/$1 [L]
+    RewriteRule ^pwa/(.*)$ public/pwa/$1 [L]
+    RewriteRule ^storage/(.*)$ public/storage/$1 [L]
+    RewriteRule ^assets/(.*)$ public/assets/$1 [L]
+    RewriteRule ^favicon\.ico$ public/favicon.ico [L]
+
+    # Forward application routes to Laravel.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+<IfModule mod_php.c>
+    php_value upload_max_filesize 20M
+    php_value post_max_size 24M
+    php_value max_file_uploads 20
+</IfModule>
+
+<IfModule mod_php8.c>
+    php_value upload_max_filesize 20M
+    php_value post_max_size 24M
+    php_value max_file_uploads 20
+</IfModule>

@@ -1,0 +1,3 @@
+employeeId,firstName,lastName,email,role,department,designation,team,phone,joiningDate,dateOfBirth,password
+"SC-0001","Super","Admin","admin@sourcecube.in","super-admin","Management","Chief Executive Officer","Leadership","","","",""
+"SC-0007","Vatsal","patel","vatsal@sourcecube.in","team-leader","Engineering","Team Leader","JS","9999856565","2026-07-09","",""
