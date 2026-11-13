@@ -2,6 +2,8 @@
 
 namespace App\Modules\Accounting\Services;
 
+use App\Models\Amc;
+use App\Models\AmcVisit;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
 use App\Models\Income;
@@ -72,30 +74,23 @@ class AccountingTransactionService
 
     public function syncIncomeFromInvoice(TicketInvoice $ticketInvoice): ?Income
     {
+        $companyId = (int) $ticketInvoice->company_id;
+        $existing = Income::query()
+            ->withoutGlobalScopes()
+            ->where('company_id', $companyId)
+            ->where('invoice_id', $ticketInvoice->id)
+            ->first();
+
         if ((int) $ticketInvoice->payment_status !== 1) {
+            // Invoice is no longer paid: the money was not received, so drop the income.
+            $existing?->delete();
+
             return null;
         }
 
-        $companyId = (int) $ticketInvoice->company_id;
-        $category = IncomeCategory::query()
-            ->where('company_id', $companyId)
-            ->where(function ($query): void {
-                $query->whereRaw('LOWER(name) = ?', ['support income'])
-                    ->orWhereRaw('LOWER(name) = ?', ['service income'])
-                    ->orWhereRaw('LOWER(name) = ?', ['sales income'])
-                    ->orWhereRaw('LOWER(name) = ?', ['invoice income']);
-            })
-            ->first()
-            ?? IncomeCategory::query()->where('company_id', $companyId)->orderBy('id')->first();
-
-        if (! $category) {
-            $category = IncomeCategory::query()->create([
-                'company_id' => $companyId,
-                'name' => 'Service Income',
-                'description' => 'Income from service and support invoices.',
-                'status' => 'active',
-            ]);
-        }
+        // Keep a category the admin picked by hand; only choose one for new entries.
+        $categoryId = $existing?->category_id
+            ?? $this->resolveIncomeCategory($companyId, ...$this->invoiceIncomeCategory($ticketInvoice))->id;
 
         $clientId = $ticketInvoice->ticket?->customer_id 
             ?? $ticketInvoice->ticket?->client_id 
@@ -104,7 +99,7 @@ class AccountingTransactionService
 
         $payload = [
             'company_id' => $companyId,
-            'category_id' => $category->id,
+            'category_id' => $categoryId,
             'invoice_id' => $ticketInvoice->id,
             'client_id' => $clientId,
             'staff_id' => $ticketInvoice->staff_id,
@@ -121,10 +116,110 @@ class AccountingTransactionService
             'created_by' => $ticketInvoice->received_by_admin_by ?: $ticketInvoice->created_by,
         ];
 
-        return Income::query()->updateOrCreate(
-            ['company_id' => $companyId, 'invoice_id' => $ticketInvoice->id],
-            $payload
-        );
+        if ($existing) {
+            $existing->fill($payload)->save();
+
+            return $existing;
+        }
+
+        return Income::query()->create($payload);
+    }
+
+    public function deleteIncomeForInvoice(TicketInvoice $ticketInvoice): void
+    {
+        Income::query()
+            ->withoutGlobalScopes()
+            ->where('company_id', (int) $ticketInvoice->company_id)
+            ->where('invoice_id', $ticketInvoice->id)
+            ->delete();
+    }
+
+    public function syncIncomeFromAmc(Amc $amc): ?Income
+    {
+        $companyId = (int) $amc->company_id;
+        $existing = Income::query()
+            ->withoutGlobalScopes()
+            ->where('company_id', $companyId)
+            ->where('amc_id', $amc->id)
+            ->first();
+
+        if (strtolower((string) $amc->payment_status) !== 'paid') {
+            $existing?->delete();
+
+            return null;
+        }
+
+        $payload = [
+            'company_id' => $companyId,
+            'category_id' => $existing?->category_id
+                ?? $this->resolveIncomeCategory($companyId, 'AMC Payment', 'Income collected against AMC contracts.')->id,
+            'amc_id' => $amc->id,
+            'client_id' => $amc->client_id,
+            'staff_id' => $amc->assigned_staff_id,
+            'title' => Str::limit('AMC Payment ' . ($amc->contract_no ?: $amc->id), 191, ''),
+            'description' => implode("\n", array_filter([
+                'Auto-created from paid AMC contract.',
+                'Contract No: ' . ($amc->contract_no ?: '-'),
+                $amc->customer_name ? 'Customer: ' . $amc->customer_name : null,
+            ])),
+            'amount' => (float) ($amc->total_amount ?: $amc->amc_amount ?: 0),
+            'payment_method' => $this->incomePaymentMethodFromAmc($amc),
+            'transaction_no' => $amc->contract_no ?: ('AMC-' . $amc->id),
+            'received_date' => now()->toDateString(),
+            'created_by' => $amc->created_by,
+        ];
+
+        if ($existing) {
+            unset($payload['received_date']);
+            $existing->fill($payload)->save();
+
+            return $existing;
+        }
+
+        return Income::query()->create($payload);
+    }
+
+    public function deleteIncomeForAmc(Amc $amc): void
+    {
+        Income::query()
+            ->withoutGlobalScopes()
+            ->where('company_id', (int) $amc->company_id)
+            ->where('amc_id', $amc->id)
+            ->delete();
+    }
+
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function invoiceIncomeCategory(TicketInvoice $ticketInvoice): array
+    {
+        $isAmcInvoice = filled($ticketInvoice->ticket?->generated_from_amc_id)
+            || AmcVisit::query()->where('ticket_invoice_id', $ticketInvoice->id)->exists();
+
+        if ($isAmcInvoice) {
+            return ['AMC Payment', 'Income collected against AMC contracts.'];
+        }
+
+        if ($ticketInvoice->ticket_id !== null) {
+            return ['Support Income', 'Income from support tickets.'];
+        }
+
+        return ['Service Income', 'Income from service and standalone invoices.'];
+    }
+
+    private function resolveIncomeCategory(int $companyId, string $name, string $description): IncomeCategory
+    {
+        return IncomeCategory::query()
+            ->withoutGlobalScopes()
+            ->where('company_id', $companyId)
+            ->whereRaw('LOWER(name) = ?', [strtolower($name)])
+            ->first()
+            ?? IncomeCategory::query()->create([
+                'company_id' => $companyId,
+                'name' => $name,
+                'description' => $description,
+                'status' => 'active',
+            ]);
     }
 
     private function prepareIncomePayload(array $attributes, ?UploadedFile $attachment = null, ?Income $income = null, bool $removeAttachment = false): array
@@ -212,12 +307,19 @@ class AccountingTransactionService
 
     private function incomePaymentMethodFromTicketInvoice(TicketInvoice $ticketInvoice): string
     {
+        // Invoices use 0 = Cash and 1 = Online; 2 is a legacy Cash code (same as the rest of the app).
         return match ((int) ($ticketInvoice->payment_method ?? -1)) {
-            0 => 'Cash',
-            1 => 'Bank',
-            2 => 'UPI',
-            3 => 'Cheque',
-            4 => 'Card',
+            0, 2 => 'Cash',
+            default => 'Online',
+        };
+    }
+
+    private function incomePaymentMethodFromAmc(Amc $amc): string
+    {
+        return match (strtolower((string) $amc->payment_mode)) {
+            'cash' => 'Cash',
+            'upi' => 'UPI',
+            'bank_transfer' => 'Bank',
             default => 'Online',
         };
     }

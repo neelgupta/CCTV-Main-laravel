@@ -52,7 +52,8 @@ class AccountingReportController
         );
 
         $incomeSummary = $this->summaryPayload($incomeQuery);
-        $expenseSummary = $this->summaryPayload($expenseQuery);
+        // Only approved expenses count towards reported totals, matching the dashboard.
+        $expenseSummary = $this->summaryPayload($expenseQuery->where('approval_status', Expense::STATUS_APPROVED));
         $dashboardSummary = $this->dashboardService->summaryForCompany($companyId, $staffId);
         $charts = $this->dashboardService->chartDataForCompany($companyId, $staffId);
 

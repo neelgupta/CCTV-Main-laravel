@@ -24,6 +24,7 @@ class Income extends Model
         'company_id',
         'category_id',
         'invoice_id',
+        'amc_id',
         'client_id',
         'staff_id',
         'title',
@@ -38,6 +39,7 @@ class Income extends Model
 
     protected $casts = [
         'invoice_id' => 'integer',
+        'amc_id' => 'integer',
         'client_id' => 'integer',
         'staff_id' => 'integer',
         'amount' => 'decimal:2',
@@ -58,6 +60,11 @@ class Income extends Model
     public function invoice(): BelongsTo
     {
         return $this->belongsTo(TicketInvoice::class, 'invoice_id');
+    }
+
+    public function amc(): BelongsTo
+    {
+        return $this->belongsTo(Amc::class);
     }
 
     public function client(): BelongsTo

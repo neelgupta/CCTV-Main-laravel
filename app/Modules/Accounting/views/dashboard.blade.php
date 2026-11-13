@@ -23,7 +23,7 @@
             <x-accounting.summary-card label="Total Expense" :value="'Rs. ' . number_format((float) ($summary['total_expense'] ?? 0), 2)" meta="All recorded expense" tone="rose" />
             <x-accounting.summary-card label="Net Profit" :value="'Rs. ' . number_format((float) ($summary['net_profit'] ?? 0), 2)" meta="Income minus expense" tone="violet" />
             <x-accounting.summary-card label="Cash Income" :value="'Rs. ' . number_format((float) ($summary['cash_income'] ?? 0), 2)" meta="Cash received" tone="amber" />
-            <x-accounting.summary-card label="Online Income" :value="'Rs. ' . number_format((float) ($summary['online_income'] ?? 0), 2)" meta="Online received" tone="sky" />
+            <x-accounting.summary-card label="Online Income" :value="'Rs. ' . number_format((float) ($summary['online_income'] ?? 0), 2)" meta="Online, bank, UPI, card and cheque" tone="sky" />
         </div>
 
         <div class="grid gap-6 xl:grid-cols-2">

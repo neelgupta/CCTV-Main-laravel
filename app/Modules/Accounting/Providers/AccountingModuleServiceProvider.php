@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Accounting\Providers;
 
+use App\Models\Amc;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
 use App\Models\Income;
@@ -15,6 +16,7 @@ use App\Modules\Accounting\Contracts\IncomeRepositoryInterface;
 use App\Modules\Accounting\Policies\AccountingCategoryPolicy;
 use App\Modules\Accounting\Policies\ExpensePolicy;
 use App\Modules\Accounting\Policies\IncomePolicy;
+use App\Modules\Accounting\Observers\AmcObserver;
 use App\Modules\Accounting\Observers\TicketInvoiceObserver;
 use App\Modules\Accounting\Repositories\EloquentExpenseCategoryRepository;
 use App\Modules\Accounting\Repositories\EloquentExpenseRepository;
@@ -39,6 +41,7 @@ class AccountingModuleServiceProvider extends ServiceProvider
         $this->loadRoutesFrom(base_path('routes/accounting.php'));
         $this->loadViewsFrom(__DIR__ . '/../views', 'accounting');
         TicketInvoice::observe(TicketInvoiceObserver::class);
+        Amc::observe(AmcObserver::class);
 
         Gate::policy(Income::class, IncomePolicy::class);
         Gate::policy(Expense::class, ExpensePolicy::class);

@@ -9,6 +9,19 @@ use App\Modules\Accounting\Services\AccountingTransactionService;
 
 class TicketInvoiceObserver
 {
+    /** Changes that affect the income entry created for a paid invoice. */
+    private const SYNCED_FIELDS = [
+        'payment_status',
+        'payment_method',
+        'total_amount',
+        'invoice_total',
+        'invoice_number',
+        'client_id',
+        'staff_id',
+        'received_by_admin',
+        'received_by_admin_at',
+    ];
+
     public function __construct(
         private readonly AccountingTransactionService $accountingTransactionService,
     ) {
@@ -16,24 +29,23 @@ class TicketInvoiceObserver
 
     public function created(TicketInvoice $ticketInvoice): void
     {
-        $this->syncIfPaid($ticketInvoice);
+        if ((int) $ticketInvoice->payment_status === 1) {
+            $this->accountingTransactionService->syncIncomeFromInvoice($ticketInvoice);
+        }
     }
 
     public function updated(TicketInvoice $ticketInvoice): void
     {
-        if (! $ticketInvoice->wasChanged('payment_status') && ! $ticketInvoice->wasChanged('received_by_admin') && ! $ticketInvoice->wasChanged('received_by_admin_at')) {
+        if (! $ticketInvoice->wasChanged(self::SYNCED_FIELDS)) {
             return;
         }
 
-        $this->syncIfPaid($ticketInvoice);
+        // Creates/updates the income when paid, removes it when no longer paid.
+        $this->accountingTransactionService->syncIncomeFromInvoice($ticketInvoice);
     }
 
-    private function syncIfPaid(TicketInvoice $ticketInvoice): void
+    public function deleting(TicketInvoice $ticketInvoice): void
     {
-        if ((int) $ticketInvoice->payment_status !== 1) {
-            return;
-        }
-
-        $this->accountingTransactionService->syncIncomeFromInvoice($ticketInvoice);
+        $this->accountingTransactionService->deleteIncomeForInvoice($ticketInvoice);
     }
 }

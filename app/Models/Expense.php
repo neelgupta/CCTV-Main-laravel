@@ -11,6 +11,10 @@ class Expense extends Model
 {
     use BelongsToCompany, HasFactory;
 
+    public const STATUS_PENDING = 'pending';
+
+    public const STATUS_APPROVED = 'approved';
+
     public const PAYMENT_METHODS = [
         'Cash' => 'Cash',
         'Bank' => 'Bank',

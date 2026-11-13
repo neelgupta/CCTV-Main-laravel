@@ -23,7 +23,7 @@ class ClientOutstandingAmountService
     public function ledgerSummary(Client $client): array
     {
         $invoiceRows = $this->ledgerInvoiceRows($client);
-        $incomeRows = $this->ledgerIncomeRows($client);
+        $incomeRows = $this->ledgerIncomeRows($client, $invoiceRows);
 
         $invoiceTotal = (float) $invoiceRows->sum('amount');
         $incomeReceivedAmount = (float) $incomeRows->sum('amount');
@@ -45,8 +45,10 @@ class ClientOutstandingAmountService
 
     public function ledgerEntries(Client $client): Collection
     {
+        $invoiceRows = $this->ledgerInvoiceRows($client);
+
         return collect()
-            ->concat($this->ledgerInvoiceRows($client)->map(function (array $row): array {
+            ->concat($invoiceRows->map(function (array $row): array {
                 $isPaid = ($row['status'] ?? '') === 'Paid';
 
                 return [
@@ -60,7 +62,7 @@ class ClientOutstandingAmountService
                     'status' => $row['status'],
                 ];
             }))
-            ->concat($this->ledgerIncomeRows($client)->map(function (array $row): array {
+            ->concat($this->ledgerIncomeRows($client, $invoiceRows)->map(function (array $row): array {
                 return [
                     'date' => $row['date'],
                     'reference' => $row['reference'],
@@ -150,6 +152,8 @@ class ClientOutstandingAmountService
             ->selectRaw("CASE WHEN ti.payment_status = 1 THEN 'Paid' ELSE 'Unpaid' END as status")
             ->get()
             ->map(fn ($row) => [
+                'ticket_invoice_id' => (int) $row->id,
+                'document_id' => $row->invoice_document_id !== null ? (int) $row->invoice_document_id : null,
                 'source_key' => 'invoice-document:' . (int) ($row->invoice_document_id ?? $row->id),
                 'date' => $row->date ? \Carbon\Carbon::parse($row->date) : null,
                 'reference' => (string) $row->reference,
@@ -172,6 +176,8 @@ class ClientOutstandingAmountService
             ->selectRaw("CASE WHEN COALESCE(td.payment_status, 0) = 1 THEN 'Paid' ELSE 'Unpaid' END as status")
             ->get()
             ->map(fn ($row) => [
+                'ticket_invoice_id' => null,
+                'document_id' => (int) $row->id,
                 'source_key' => 'ticket-document:' . (int) $row->id,
                 'date' => $row->date ? \Carbon\Carbon::parse($row->date) : null,
                 'reference' => (string) $row->reference,
@@ -199,12 +205,38 @@ class ClientOutstandingAmountService
             ->values();
     }
 
-    private function ledgerIncomeRows(Client $client): Collection
+    /**
+     * Ticket invoice ids whose invoice is already in the ledger. A paid invoice is
+     * already counted as received, so the income auto-created from it must not be
+     * counted a second time.
+     */
+    private function ledgerTicketInvoiceIds(Client $client, Collection $invoiceRows): array
     {
+        $documentIds = $invoiceRows->pluck('document_id')->filter()->unique()->values();
+
+        return $invoiceRows->pluck('ticket_invoice_id')
+            ->filter()
+            ->concat($documentIds->isEmpty() ? [] : DB::table('ticket_invoices')
+                ->where('company_id', (int) $client->company_id)
+                ->whereIn('invoice_id', $documentIds->all())
+                ->pluck('id'))
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function ledgerIncomeRows(Client $client, Collection $invoiceRows): Collection
+    {
+        $countedInvoiceIds = $this->ledgerTicketInvoiceIds($client, $invoiceRows);
+
         return DB::table('incomes as i')
             ->leftJoin('users as u', 'u.id', '=', 'i.created_by')
             ->where('i.company_id', (int) $client->company_id)
             ->where('i.client_id', $client->id)
+            ->when($countedInvoiceIds !== [], fn ($query) => $query->where(function ($query) use ($countedInvoiceIds): void {
+                $query->whereNull('i.invoice_id')->orWhereNotIn('i.invoice_id', $countedInvoiceIds);
+            }))
             ->selectRaw("i.id, i.amount, i.received_date as date")
             ->selectRaw("COALESCE(i.transaction_no, CONCAT('INC-', i.id)) as reference")
             ->selectRaw("COALESCE(i.title, 'Accounting income') as description")
