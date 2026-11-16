@@ -21,6 +21,7 @@ use App\Services\RazorpayPlanSyncService;
 use App\Services\RazorpayService;
 use App\Services\SubscriptionLimitService;
 use App\Support\SubscriptionInvoice;
+use App\Support\SubscriptionPricing;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\Request;
@@ -38,7 +39,7 @@ class SuperAdminController extends Controller
 {
     private const MAX_BULK_INVOICES = 300;
 
-    public function dashboard()
+    public function dashboard(Request $request)
     {
         abort_unless(auth()->user()?->isSuperAdmin(), 403);
 
@@ -47,6 +48,205 @@ class SuperAdminController extends Controller
         $subscriptions = CompanySubscription::query()->with(['company', 'plan'])->latest()->get();
         $appUsageService = app(CompanyAppUsageService::class);
         $today = now()->startOfDay();
+
+        $totalEarnedAmount = (float) CompanySubscription::query()->sum('amount_paid');
+
+        // Financial & GST Calculations
+        $defaultGstRate = SubscriptionPricing::gstRate();
+        $paidSubscriptions = CompanySubscription::query()->where('amount_paid', '>', 0)->get();
+        $totalBaseAmount = 0.0;
+        $totalGstAmount = 0.0;
+
+        foreach ($paidSubscriptions as $sub) {
+            $amt = (float) $sub->amount_paid;
+            $rate = isset($sub->invoice_snapshot['gst_rate']) ? (float) $sub->invoice_snapshot['gst_rate'] : $defaultGstRate;
+            $split = SubscriptionPricing::fromTotal($amt, $rate);
+            $totalBaseAmount += (float) ($split['subtotal'] ?? 0);
+            $totalGstAmount += (float) ($split['gst_amount'] ?? 0);
+        }
+
+        // Daily financial metrics (Today & Yesterday)
+        $todayStart = now()->startOfDay();
+        $todayEnd = now()->endOfDay();
+        $todaySubscriptions = $paidSubscriptions->filter(fn ($s) => $s->created_at >= $todayStart && $s->created_at <= $todayEnd);
+        $todayTotalAmount = (float) $todaySubscriptions->sum('amount_paid');
+        $todayGstAmount = 0.0;
+        $todayBaseAmount = 0.0;
+        foreach ($todaySubscriptions as $s) {
+            $amt = (float) $s->amount_paid;
+            $rate = isset($s->invoice_snapshot['gst_rate']) ? (float) $s->invoice_snapshot['gst_rate'] : $defaultGstRate;
+            $split = SubscriptionPricing::fromTotal($amt, $rate);
+            $todayBaseAmount += (float) ($split['subtotal'] ?? 0);
+            $todayGstAmount += (float) ($split['gst_amount'] ?? 0);
+        }
+
+        // Monthly financial metrics (Current month)
+        $currentMonthStart = now()->startOfMonth();
+        $currentMonthEnd = now()->endOfMonth();
+        $currentMonthSubscriptions = $paidSubscriptions->filter(fn ($s) => $s->created_at >= $currentMonthStart && $s->created_at <= $currentMonthEnd);
+        $monthlyTotalAmount = (float) $currentMonthSubscriptions->sum('amount_paid');
+        $monthlyGstAmount = 0.0;
+        $monthlyBaseAmount = 0.0;
+        foreach ($currentMonthSubscriptions as $s) {
+            $amt = (float) $s->amount_paid;
+            $rate = isset($s->invoice_snapshot['gst_rate']) ? (float) $s->invoice_snapshot['gst_rate'] : $defaultGstRate;
+            $split = SubscriptionPricing::fromTotal($amt, $rate);
+            $monthlyBaseAmount += (float) ($split['subtotal'] ?? 0);
+            $monthlyGstAmount += (float) ($split['gst_amount'] ?? 0);
+        }
+
+        // 14-day daily trend for chart
+        $dailyChartLabels = [];
+        $dailyChartTotal = [];
+        $dailyChartBase = [];
+        $dailyChartGst = [];
+
+        for ($i = 13; $i >= 0; $i--) {
+            $date = now()->subDays($i);
+            $dayKey = $date->format('Y-m-d');
+            $dailyChartLabels[] = $date->format('d M');
+
+            $daySubs = $paidSubscriptions->filter(function ($s) use ($dayKey) {
+                return optional($s->created_at)->format('Y-m-d') === $dayKey;
+            });
+
+            $dayTotal = (float) $daySubs->sum('amount_paid');
+            $dayBase = 0.0;
+            $dayGst = 0.0;
+            foreach ($daySubs as $s) {
+                $amt = (float) $s->amount_paid;
+                $rate = isset($s->invoice_snapshot['gst_rate']) ? (float) $s->invoice_snapshot['gst_rate'] : $defaultGstRate;
+                $split = SubscriptionPricing::fromTotal($amt, $rate);
+                $dayBase += (float) ($split['subtotal'] ?? 0);
+                $dayGst += (float) ($split['gst_amount'] ?? 0);
+            }
+
+            $dailyChartTotal[] = round($dayTotal, 2);
+            $dailyChartBase[] = round($dayBase, 2);
+            $dailyChartGst[] = round($dayGst, 2);
+        }
+
+        // 6-month trend for chart
+        $monthlyChartLabels = [];
+        $monthlyChartTotal = [];
+        $monthlyChartBase = [];
+        $monthlyChartGst = [];
+
+        for ($m = 5; $m >= 0; $m--) {
+            $monthDate = now()->subMonths($m);
+            $monthKey = $monthDate->format('Y-m');
+            $monthlyChartLabels[] = $monthDate->format('M Y');
+
+            $monthSubs = $paidSubscriptions->filter(function ($s) use ($monthKey) {
+                return optional($s->created_at)->format('Y-m') === $monthKey;
+            });
+
+            $mTotal = (float) $monthSubs->sum('amount_paid');
+            $mBase = 0.0;
+            $mGst = 0.0;
+            foreach ($monthSubs as $s) {
+                $amt = (float) $s->amount_paid;
+                $rate = isset($s->invoice_snapshot['gst_rate']) ? (float) $s->invoice_snapshot['gst_rate'] : $defaultGstRate;
+                $split = SubscriptionPricing::fromTotal($amt, $rate);
+                $mBase += (float) ($split['subtotal'] ?? 0);
+                $mGst += (float) ($split['gst_amount'] ?? 0);
+            }
+
+            $monthlyChartTotal[] = round($mTotal, 2);
+            $monthlyChartBase[] = round($mBase, 2);
+            $monthlyChartGst[] = round($mGst, 2);
+        }
+
+        // Plan distribution breakdown
+        $planBreakdown = [];
+        foreach ($subscriptions->groupBy('subscription_plan_id') as $planId => $group) {
+            $planModel = $plans->firstWhere('id', $planId);
+            $planName = $planModel?->name ?? 'Custom / Unassigned';
+            $pTotal = (float) $group->sum('amount_paid');
+            $pGst = 0.0;
+            $pBase = 0.0;
+            foreach ($group->where('amount_paid', '>', 0) as $s) {
+                $amt = (float) $s->amount_paid;
+                $rate = isset($s->invoice_snapshot['gst_rate']) ? (float) $s->invoice_snapshot['gst_rate'] : $defaultGstRate;
+                $split = SubscriptionPricing::fromTotal($amt, $rate);
+                $pBase += (float) ($split['subtotal'] ?? 0);
+                $pGst += (float) ($split['gst_amount'] ?? 0);
+            }
+
+            $planBreakdown[] = [
+                'name' => $planName,
+                'count' => $group->count(),
+                'active_count' => $group->where('status', 'active')->count(),
+                'trial_count' => $group->filter(fn ($s) => $s->status === 'trialing' || (bool) $s->is_trial)->count(),
+                'total_amount' => round($pTotal, 2),
+                'base_amount' => round($pBase, 2),
+                'gst_amount' => round($pGst, 2),
+            ];
+        }
+
+        // Client Subscription status counts (based on their current active / latest subscription)
+        $statusCounts = [
+            'active' => Company::query()->whereHas('latestSubscription', fn ($q) => $q->where('status', 'active')->where(fn ($sq) => $sq->whereNull('is_trial')->orWhere('is_trial', false)))->count(),
+            'trialing' => Company::query()->whereHas('latestSubscription', fn ($q) => $q->where('status', 'trialing')->orWhere('is_trial', true))->count(),
+            'no_plan' => Company::query()->doesntHave('subscriptions')->count(),
+            'expired' => Company::query()->whereHas('latestSubscription', fn ($q) => $q->where('status', 'expired'))->count(),
+            'pending' => Company::query()->whereHas('latestSubscription', fn ($q) => $q->where('status', 'pending'))->count(),
+            'cancelled' => Company::query()->whereHas('latestSubscription', fn ($q) => $q->where('status', 'cancelled'))->count(),
+        ];
+
+        // Query clients/companies with their total earned amount and subscription details
+        $clientsQuery = Company::query()
+            ->withSum('subscriptions as total_earned', 'amount_paid')
+            ->with(['activeSubscription.plan', 'latestSubscription.plan', 'activeSubscriptions.plan']);
+
+        if ($request->filled('client_search')) {
+            $searchTerm = '%' . trim((string) $request->input('client_search')) . '%';
+            $clientsQuery->where(function ($q) use ($searchTerm) {
+                $q->where('name', 'like', $searchTerm)
+                    ->orWhere('company_code', 'like', $searchTerm)
+                    ->orWhere('email', 'like', $searchTerm)
+                    ->orWhere('phone_number', 'like', $searchTerm)
+                    ->orWhere('mobile_number', 'like', $searchTerm);
+            });
+        }
+
+        if ($request->filled('client_status')) {
+            $status = trim((string) $request->input('client_status'));
+            if ($status === 'active') {
+                $clientsQuery->whereHas('latestSubscription', function ($subQ) {
+                    $subQ->where('status', 'active')->where(function ($sq) {
+                        $sq->whereNull('is_trial')->orWhere('is_trial', false);
+                    });
+                });
+            } elseif ($status === 'trialing') {
+                $clientsQuery->whereHas('latestSubscription', function ($subQ) {
+                    $subQ->where(function ($sq) {
+                        $sq->where('status', 'trialing')->orWhere('is_trial', true);
+                    });
+                });
+            } elseif ($status === 'no_plan') {
+                $clientsQuery->doesntHave('subscriptions');
+            } elseif ($status === 'expired') {
+                $clientsQuery->whereHas('latestSubscription', function ($subQ) {
+                    $subQ->where('status', 'expired');
+                });
+            } elseif ($status === 'pending') {
+                $clientsQuery->whereHas('latestSubscription', function ($subQ) {
+                    $subQ->where('status', 'pending');
+                });
+            } elseif ($status === 'cancelled') {
+                $clientsQuery->whereHas('latestSubscription', function ($subQ) {
+                    $subQ->where('status', 'cancelled');
+                });
+            } elseif ($status === 'inactive') {
+                $clientsQuery->where('is_active', false);
+            }
+        }
+
+        $clientReportPerPage = (int) $request->query('client_per_page', 10);
+        $clientReportPerPage = in_array($clientReportPerPage, [5, 10, 25, 50, 100], true) ? $clientReportPerPage : 10;
+        // Show newest company 1st
+        $clientsWithEarnings = $clientsQuery->latest()->paginate($clientReportPerPage, ['*'], 'clients_page')->withQueryString();
 
         $recentPayments = $subscriptions
             ->where('amount_paid', '>', 0)
@@ -91,10 +291,54 @@ class SuperAdminController extends Controller
                 'plans' => $plans->count(),
                 'activeSubscriptions' => $subscriptions->where('status', 'active')->count(),
                 'payments' => $subscriptions->where('amount_paid', '>', 0)->count(),
-                'trialSubscriptions' => $subscriptions->where('status', 'trialing')->count(),
-                'monthlyRevenue' => (float) $subscriptions
-                    ->filter(fn (CompanySubscription $subscription) => optional($subscription->created_at)?->format('Y-m') === now()->format('Y-m'))
-                    ->sum('amount_paid'),
+                'trialSubscriptions' => $subscriptions->where(fn ($s) => $s->status === 'trialing' || (bool) $s->is_trial)->count(),
+                'totalEarnedAmount' => $totalEarnedAmount,
+                'totalBaseAmount' => $totalBaseAmount,
+                'totalGstAmount' => $totalGstAmount,
+                'todayTotalAmount' => $todayTotalAmount,
+                'todayBaseAmount' => $todayBaseAmount,
+                'todayGstAmount' => $todayGstAmount,
+                'monthlyRevenue' => $monthlyTotalAmount,
+                'monthlyBaseAmount' => $monthlyBaseAmount,
+                'monthlyGstAmount' => $monthlyGstAmount,
+                'statusCounts' => $statusCounts,
+                'planBreakdown' => $planBreakdown,
+            ],
+            'financialCharts' => [
+                'daily' => [
+                    'labels' => $dailyChartLabels,
+                    'total' => $dailyChartTotal,
+                    'base' => $dailyChartBase,
+                    'gst' => $dailyChartGst,
+                ],
+                'monthly' => [
+                    'labels' => $monthlyChartLabels,
+                    'total' => $monthlyChartTotal,
+                    'base' => $monthlyChartBase,
+                    'gst' => $monthlyChartGst,
+                ],
+                'status' => [
+                    'labels' => ['Active', 'Trial', 'No Plan', 'Expired', 'Pending', 'Cancelled'],
+                    'values' => [
+                        $statusCounts['active'],
+                        $statusCounts['trialing'],
+                        $statusCounts['no_plan'],
+                        $statusCounts['expired'],
+                        $statusCounts['pending'],
+                        $statusCounts['cancelled'],
+                    ],
+                ],
+                'plans' => [
+                    'labels' => collect($planBreakdown)->pluck('name')->values()->all(),
+                    'amounts' => collect($planBreakdown)->pluck('total_amount')->values()->all(),
+                    'counts' => collect($planBreakdown)->pluck('count')->values()->all(),
+                ],
+            ],
+            'clientsWithEarnings' => $clientsWithEarnings,
+            'clientReportFilters' => [
+                'search' => $request->string('client_search')->trim()->toString(),
+                'status' => $request->string('client_status')->trim()->toString(),
+                'per_page' => $clientReportPerPage,
             ],
             'recentCompanies' => $companies->take(6),
             'recentSubscriptions' => $subscriptions->take(6),
