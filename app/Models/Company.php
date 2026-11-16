@@ -228,6 +228,11 @@ class Company extends Model
         return $this->hasMany(Contractor::class)->orderBy('name');
     }
 
+    public function staff()
+    {
+        return $this->hasMany(Staff::class);
+    }
+
     public function subscriptions()
     {
         return $this->hasMany(CompanySubscription::class);

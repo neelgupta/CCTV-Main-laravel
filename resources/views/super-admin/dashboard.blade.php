@@ -61,7 +61,41 @@
                 </div>
             </div>
 
-            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                <!-- Total Clients / Companies -->
+                <div class="relative overflow-hidden rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-sky-50/40 p-5 shadow-xs">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold uppercase tracking-wider text-sky-800">Total Client / Company</span>
+                        <span class="rounded-xl bg-sky-100 p-2 text-sky-700">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="mt-3 text-2xl font-black text-slate-950">{{ $stats['companies'] ?? 0 }}</div>
+                    <div class="mt-3 flex items-center justify-between border-t border-sky-100/80 pt-2.5 text-xs text-slate-600">
+                        <span>Active: <strong class="text-slate-800">{{ $stats['activeCompanies'] ?? 0 }}</strong></span>
+                        <span class="text-sky-700 font-semibold">{{ ($stats['companies'] ?? 0) - ($stats['activeCompanies'] ?? 0) }} Inactive</span>
+                    </div>
+                </div>
+
+                <!-- Total Sold License Key -->
+                <div class="relative overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-amber-50/40 p-5 shadow-xs">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold uppercase tracking-wider text-amber-800">Total Sold License Key</span>
+                        <span class="rounded-xl bg-amber-100 p-2 text-amber-700">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="mt-3 text-2xl font-black text-slate-950">{{ $stats['totalSoldLicenseKeys'] ?? 0 }}</div>
+                    <div class="mt-3 flex items-center justify-between border-t border-amber-100/80 pt-2.5 text-xs text-slate-600">
+                        <span>Paid License Seats</span>
+                        <span class="font-bold text-amber-700">Active</span>
+                    </div>
+                </div>
+
                 <!-- All-Time Gross Amount -->
                 <div class="relative overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 p-5 shadow-xs">
                     <div class="flex items-center justify-between">
@@ -257,8 +291,8 @@
             <!-- Plan-wise Breakdown List -->
             <div class="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
                 <div class="border-b border-slate-100 pb-4">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-purple-600">Plans Distribution</span>
-                    <h4 class="text-lg font-bold text-slate-900">Revenue By Plan</h4>
+                    <span class="text-xs font-semibold uppercase tracking-wider text-purple-600">Active Plans Distribution</span>
+                    <h4 class="text-lg font-bold text-slate-900">Revenue By Active Plan</h4>
                 </div>
                 <div class="mt-4 divide-y divide-slate-100 overflow-y-auto max-h-[260px]">
                     @forelse($stats['planBreakdown'] ?? [] as $p)
@@ -268,19 +302,49 @@
                                 <span class="font-bold text-slate-950 text-sm">₹{{ number_format($p['total_amount'], 2) }}</span>
                             </div>
                             <div class="mt-1 flex items-center justify-between text-xs text-slate-500">
-                                <span>{{ $p['count'] }} subs ({{ $p['active_count'] }} active, {{ $p['trial_count'] }} trial)</span>
-                                <span class="text-slate-600 font-mono">GST: ₹{{ number_format($p['gst_amount'], 2) }}</span>
+                                <span>{{ $p['active_count'] }} active {{ str('subscription')->plural($p['active_count']) }}</span>
+                                <span class="text-slate-600 font-mono">GST (18%): ₹{{ number_format($p['gst_amount'], 2) }}</span>
                             </div>
                         </div>
                     @empty
-                        <div class="py-8 text-center text-xs text-slate-400">No plan transactions recorded yet.</div>
+                        <div class="py-8 text-center text-xs text-slate-400">No active plan subscriptions found.</div>
                     @endforelse
                 </div>
             </div>
         </section>
 
         <!-- Clients with Total Earned Amount & Plan / Trial Details -->
-        <section id="clients-section" class="scroll-mt-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+        <section id="clients-section" class="scroll-mt-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm" x-data="{
+            licenseModalOpen: false,
+            selectedClient: null,
+            openLicenses(clientData) {
+                this.selectedClient = clientData;
+                this.licenseModalOpen = true;
+            },
+            closeLicenses() {
+                this.licenseModalOpen = false;
+                this.selectedClient = null;
+            },
+            copiedKey: null,
+            copyToClipboard(text) {
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(text);
+                } else {
+                    const textArea = document.createElement('textarea');
+                    textArea.value = text;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                }
+                this.copiedKey = text;
+                setTimeout(() => {
+                    if (this.copiedKey === text) {
+                        this.copiedKey = null;
+                    }
+                }, 2000);
+            }
+        }">
             <div class="flex flex-col gap-3 border-b border-slate-200 pb-5 md:flex-row md:items-end md:justify-between">
                 <div>
                     <p class="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Financial & Plan Overview</p>
@@ -362,9 +426,9 @@
                     <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                         <tr>
                             <th class="px-5 py-3.5 text-left">Client / Company</th>
-                            <th class="px-5 py-3.5 text-left">Total Plan Amount</th>
-                            <th class="px-5 py-3.5 text-left">GST Differentiated</th>
+                            <th class="px-5 py-3.5 text-left">Total Collected Amount</th>
                             <th class="px-5 py-3.5 text-left">Current Plan Details</th>
+                            <th class="px-5 py-3.5 text-center">Total License Keys</th>
                             <th class="px-5 py-3.5 text-left">Status</th>
                             <th class="px-5 py-3.5 text-left">Start & End Dates</th>
                             <th class="px-5 py-3.5 text-right">Actions</th>
@@ -377,6 +441,62 @@
                                 $isTrial = $subscription ? ($subscription->is_trial || $subscription->status === 'trialing') : false;
                                 $earned = (float) ($client->total_earned ?? 0);
                                 $clientGstSplit = \App\Support\SubscriptionPricing::fromTotal($earned);
+
+                                // Get all assigned/used license keys for this company's staff
+                                $usedStaffKeys = $client->staff
+                                    ->pluck('license_key')
+                                    ->filter()
+                                    ->map(fn ($k) => (string) $k)
+                                    ->all();
+
+                                // Collect license keys and all plans info for popup
+                                $clientSubscriptionsData = [];
+                                $totalLicenseKeysCount = 0;
+
+                                foreach ($client->subscriptions as $sub) {
+                                    $keys = $sub->licenseKeyList();
+                                    $keyCount = count($keys);
+                                    $totalLicenseKeysCount += $keyCount;
+
+                                    $formattedKeys = [];
+                                    $subUsedCount = 0;
+                                    foreach ($keys as $k) {
+                                        $isUsed = in_array((string) $k, $usedStaffKeys, true);
+                                        if ($isUsed) {
+                                            $subUsedCount++;
+                                        }
+                                        $formattedKeys[] = [
+                                            'key' => (string) $k,
+                                            'is_used' => $isUsed,
+                                            'status_label' => $isUsed ? 'Used' : 'Available',
+                                        ];
+                                    }
+
+                                    $isSubTrial = $sub->is_trial || $sub->status === 'trialing';
+                                    $clientSubscriptionsData[] = [
+                                        'id' => $sub->id,
+                                        'plan_name' => $sub->plan?->name ?? 'Custom Plan',
+                                        'status' => $isSubTrial ? 'Trial' : str($sub->status)->headline()->toString(),
+                                        'is_trial' => $isSubTrial,
+                                        'validity' => 'Started: ' . ($sub->starts_at?->format('M d, Y') ?? 'N/A') . ' • Valid till: ' . (($isSubTrial ? ($sub->trial_ends_at ?? $sub->ends_at) : $sub->ends_at)?->format('M d, Y') ?? 'Ongoing'),
+                                        'starts_at' => $sub->starts_at?->format('M d, Y') ?? 'N/A',
+                                        'ends_at' => ($isSubTrial ? ($sub->trial_ends_at ?? $sub->ends_at) : $sub->ends_at)?->format('M d, Y') ?? 'Ongoing',
+                                        'billing_cycle' => $sub->billing_cycle ? ucfirst($sub->billing_cycle) : 'Monthly',
+                                        'total_keys' => $keyCount,
+                                        'used_keys' => $subUsedCount,
+                                        'remaining_keys' => max(0, $keyCount - $subUsedCount),
+                                        'license_keys' => $formattedKeys,
+                                        'amount_paid' => (float) $sub->amount_paid,
+                                    ];
+                                }
+
+                                $clientModalPayload = [
+                                    'company_name' => $client->name,
+                                    'company_code' => $client->company_code,
+                                    'email' => $client->email,
+                                    'total_license_keys' => $totalLicenseKeysCount,
+                                    'subscriptions' => $clientSubscriptionsData,
+                                ];
                             @endphp
                             <tr class="hover:bg-slate-50/60 transition">
                                 <td class="px-5 py-4">
@@ -393,6 +513,7 @@
                                     @endif
                                 </td>
 
+                                <!-- Total Collected Amount -->
                                 <td class="px-5 py-4">
                                     <div class="inline-flex items-baseline gap-1">
                                         <span class="text-base font-bold {{ $earned > 0 ? 'text-emerald-700' : 'text-slate-500' }}">
@@ -400,18 +521,7 @@
                                         </span>
                                     </div>
                                     <div class="text-[11px] text-slate-400 mt-0.5">
-                                        Base: ₹{{ number_format($clientGstSplit['subtotal'], 2) }}
-                                    </div>
-                                </td>
-
-                                <td class="px-5 py-4">
-                                    <div class="inline-flex items-baseline gap-1">
-                                        <span class="text-sm font-semibold {{ $clientGstSplit['gst_amount'] > 0 ? 'text-violet-700' : 'text-slate-400' }}">
-                                            ₹{{ number_format($clientGstSplit['gst_amount'], 2) }}
-                                        </span>
-                                    </div>
-                                    <div class="text-[11px] text-slate-400 mt-0.5">
-                                        {{ $clientGstSplit['gst_amount'] > 0 ? '18% GST Differentiated' : '₹0.00 GST' }}
+                                        {{ $earned > 0 ? 'All-time collected' : 'No payments yet' }}
                                     </div>
                                 </td>
 
@@ -428,6 +538,25 @@
                                         </div>
                                     @else
                                         <span class="text-xs font-medium text-slate-400">No Plan Assigned</span>
+                                    @endif
+                                </td>
+
+                                <!-- Total License Key Column with Clickable Badge -->
+                                <td class="px-5 py-4 text-center">
+                                    @if($totalLicenseKeysCount > 0)
+                                        <button type="button"
+                                            @click="openLicenses(@js($clientModalPayload))"
+                                            class="group inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/80 px-3 py-1.5 text-xs font-bold text-indigo-700 transition hover:bg-indigo-100 hover:border-indigo-300 shadow-2xs"
+                                            title="Click to view license keys and plans details">
+                                            <svg class="h-3.5 w-3.5 text-indigo-500 transition group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                                            </svg>
+                                            <span>{{ $totalLicenseKeysCount }} {{ str('Key')->plural($totalLicenseKeysCount) }}</span>
+                                        </button>
+                                    @else
+                                        <span class="inline-flex items-center rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-400">
+                                            0 Keys
+                                        </span>
                                     @endif
                                 </td>
 
@@ -482,7 +611,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="7" class="px-5 py-8 text-center text-sm text-slate-500">
+                                <td colspan="8" class="px-5 py-8 text-center text-sm text-slate-500">
                                     No client records found matching the filters.
                                 </td>
                             </tr>
@@ -501,6 +630,123 @@
                     </div>
                 </div>
             @endif
+
+            <!-- License Keys Modal Popup -->
+            <div x-cloak x-show="licenseModalOpen"
+                class="fixed inset-0 z-50 overflow-y-auto"
+                aria-labelledby="modal-title" role="dialog" aria-modal="true"
+                @keydown.escape.window="closeLicenses()">
+                <!-- Backdrop -->
+                <div x-show="licenseModalOpen"
+                    x-transition:enter="ease-out duration-300"
+                    x-transition:enter-start="opacity-0"
+                    x-transition:enter-end="opacity-100"
+                    x-transition:leave="ease-in duration-200"
+                    x-transition:leave-start="opacity-100"
+                    x-transition:leave-end="opacity-0"
+                    class="fixed inset-0 bg-slate-950/50 backdrop-blur-xs transition-opacity"
+                    @click="closeLicenses()"></div>
+
+                <div class="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+                    <div x-show="licenseModalOpen"
+                        x-transition:enter="ease-out duration-300"
+                        x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                        x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100"
+                        x-transition:leave="ease-in duration-200"
+                        x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100"
+                        x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                        class="relative w-full max-w-xl transform overflow-hidden rounded-[28px] border border-slate-200 bg-white text-left shadow-xl transition-all">
+
+                        <!-- Modal Header -->
+                        <div class="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+                            <div>
+                                <h3 class="text-xl font-bold text-slate-950">Subscription Plan Details</h3>
+                                <p class="mt-1 text-sm text-slate-500" x-text="selectedClient?.company_name">Company</p>
+                            </div>
+                            <button type="button" @click="closeLicenses()" class="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition" aria-label="Close modal">
+                                <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <!-- Modal Body -->
+                        <div class="space-y-6 px-6 py-6 max-h-[75vh] overflow-y-auto">
+                            <template x-for="(sub, index) in (selectedClient?.subscriptions || [])" :key="sub.id || index">
+                                <div class="space-y-4">
+                                    <!-- Plan Header Banner Card -->
+                                    <div class="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                                        <div>
+                                            <div class="text-lg font-bold text-slate-950" x-text="sub.plan_name">Enterprise</div>
+                                            <div class="mt-1 text-xs text-slate-500" x-text="sub.validity">Started: Nov 16, 2026 • Valid till: Dec 16, 2026</div>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
+                                                :class="{
+                                                    'bg-purple-100 text-purple-700': sub.is_trial,
+                                                    'bg-emerald-100 text-emerald-700': !sub.is_trial && sub.status.toLowerCase() === 'active',
+                                                    'bg-amber-100 text-amber-700': !sub.is_trial && sub.status.toLowerCase() === 'pending',
+                                                    'bg-slate-200 text-slate-700': !sub.is_trial && sub.status.toLowerCase() === 'expired',
+                                                    'bg-rose-100 text-rose-700': !sub.is_trial && sub.status.toLowerCase() === 'cancelled'
+                                                }"
+                                                x-text="sub.is_trial ? 'Trial' : (sub.status.toLowerCase() === 'active' ? 'Paid' : sub.status)">
+                                            </span>
+                                            <span class="text-xs text-slate-500 font-medium" x-text="'(' + sub.billing_cycle + ')'"></span>
+                                        </div>
+                                    </div>
+
+                                    <!-- 3 Metric Cards: TOTAL KEYS, USED KEYS, REMAINING -->
+                                    <div class="grid grid-cols-3 gap-3">
+                                        <div class="rounded-2xl border border-slate-200 bg-white p-3.5 text-center shadow-2xs">
+                                            <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total Keys</div>
+                                            <div class="mt-1 text-2xl font-bold text-slate-900" x-text="sub.total_keys">1</div>
+                                        </div>
+                                        <div class="rounded-2xl border border-rose-200 bg-rose-50/40 p-3.5 text-center shadow-2xs">
+                                            <div class="text-[11px] font-semibold uppercase tracking-wider text-rose-600">Used Keys</div>
+                                            <div class="mt-1 text-2xl font-bold text-rose-700" x-text="sub.used_keys">0</div>
+                                        </div>
+                                        <div class="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-3.5 text-center shadow-2xs">
+                                            <div class="text-[11px] font-semibold uppercase tracking-wider text-emerald-600">Remaining</div>
+                                            <div class="mt-1 text-2xl font-bold text-emerald-700" x-text="sub.remaining_keys">1</div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Key List Section with Copy & Available/Used Status -->
+                                    <template x-if="sub.license_keys && sub.license_keys.length > 0">
+                                        <div class="space-y-1.5 pt-1">
+                                            <template x-for="item in sub.license_keys" :key="item.key">
+                                                <div class="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2 text-xs">
+                                                    <div class="flex items-center gap-2.5">
+                                                        <span class="font-mono font-medium text-slate-800 tracking-wider" x-text="item.key"></span>
+                                                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide"
+                                                            :class="item.is_used ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'"
+                                                            x-text="item.status_label">
+                                                        </span>
+                                                    </div>
+                                                    <button type="button"
+                                                        @click="copyToClipboard(item.key)"
+                                                        class="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 transition shadow-2xs">
+                                                        <svg class="h-3.5 w-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                                                        </svg>
+                                                        <span x-text="copiedKey === item.key ? 'Copied!' : 'Copy'"></span>
+                                                    </button>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+
+                            <div class="flex justify-end pt-2">
+                                <button type="button" @click="closeLicenses()" class="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition shadow-xs">
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <section class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">

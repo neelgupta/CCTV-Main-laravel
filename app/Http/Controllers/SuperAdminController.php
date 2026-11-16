@@ -157,11 +157,13 @@ class SuperAdminController extends Controller
             $monthlyChartGst[] = round($mGst, 2);
         }
 
-        // Plan distribution breakdown
+        // Plan distribution breakdown (Active Subscription Plans Only)
+        $activePlans = $plans->where('is_active', true);
         $planBreakdown = [];
-        foreach ($subscriptions->groupBy('subscription_plan_id') as $planId => $group) {
-            $planModel = $plans->firstWhere('id', $planId);
-            $planName = $planModel?->name ?? 'Custom / Unassigned';
+
+        foreach ($activePlans as $planModel) {
+            // Group subscriptions belonging to this active plan that are active
+            $group = $subscriptions->where('subscription_plan_id', $planModel->id)->where('status', 'active');
             $pTotal = (float) $group->sum('amount_paid');
             $pGst = 0.0;
             $pBase = 0.0;
@@ -174,7 +176,7 @@ class SuperAdminController extends Controller
             }
 
             $planBreakdown[] = [
-                'name' => $planName,
+                'name' => $planModel->name,
                 'count' => $group->count(),
                 'active_count' => $group->where('status', 'active')->count(),
                 'trial_count' => $group->filter(fn ($s) => $s->status === 'trialing' || (bool) $s->is_trial)->count(),
@@ -194,10 +196,22 @@ class SuperAdminController extends Controller
             'cancelled' => Company::query()->whereHas('latestSubscription', fn ($q) => $q->where('status', 'cancelled'))->count(),
         ];
 
+        // Total Sold License Keys (from active paid plans)
+        $totalSoldLicenseKeys = 0;
+        foreach ($subscriptions->where('status', 'active')->filter(fn ($s) => empty($s->is_trial)) as $sub) {
+            $totalSoldLicenseKeys += count($sub->licenseKeyList());
+        }
+
         // Query clients/companies with their total earned amount and subscription details
         $clientsQuery = Company::query()
             ->withSum('subscriptions as total_earned', 'amount_paid')
-            ->with(['activeSubscription.plan', 'latestSubscription.plan', 'activeSubscriptions.plan']);
+            ->with([
+                'activeSubscription.plan',
+                'latestSubscription.plan',
+                'activeSubscriptions.plan',
+                'subscriptions' => fn ($q) => $q->with('plan')->latest(),
+                'staff' => fn ($q) => $q->select('id', 'company_id', 'license_key', 'name'),
+            ]);
 
         if ($request->filled('client_search')) {
             $searchTerm = '%' . trim((string) $request->input('client_search')) . '%';
@@ -301,6 +315,7 @@ class SuperAdminController extends Controller
                 'monthlyRevenue' => $monthlyTotalAmount,
                 'monthlyBaseAmount' => $monthlyBaseAmount,
                 'monthlyGstAmount' => $monthlyGstAmount,
+                'totalSoldLicenseKeys' => $totalSoldLicenseKeys,
                 'statusCounts' => $statusCounts,
                 'planBreakdown' => $planBreakdown,
             ],
